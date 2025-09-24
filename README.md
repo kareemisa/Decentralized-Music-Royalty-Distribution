@@ -10,6 +10,8 @@ A smart contract system for automatically distributing music royalties to artist
 - **Transparent Tracking** 📊: Track all earnings and withdrawals
 - **Song Management** 🎼: Activate/deactivate songs as needed
 - **Secure Withdrawals** 💰: Contributors can withdraw their earnings anytime
+- **🆕 Royalty Escrow System** 🔒: Lock funds for milestone-based or time-locked releases
+- **🆕 Advance Funding** 💸: Artists can receive immediate capital against future royalties
 
 ## 📋 Contract Functions
 
@@ -38,6 +40,27 @@ Contributors can withdraw their accumulated earnings.
 ```
 Song owners can activate or deactivate their songs.
 
+### 🔒 Escrow Management
+```clarity
+(create-escrow beneficiary cliff-height milestones)
+```
+Create a new escrow with milestone-based or time-locked fund releases.
+
+```clarity
+(approve-milestone escrow-id milestone-id)
+```
+Artist approves milestone completion, releasing funds to beneficiary.
+
+```clarity
+(claim-time-locked-escrow escrow-id)
+```
+Beneficiary claims funds after cliff period expires.
+
+```clarity
+(cancel-escrow escrow-id)
+```
+Artist cancels active escrow and recovers unreleased funds.
+
 ## 📖 Read-Only Functions
 
 - `get-song-info`: Get song details and total earnings
@@ -47,6 +70,9 @@ Song owners can activate or deactivate their songs.
 - `get-total-songs`: Get total number of registered songs
 - `get-total-royalties-distributed`: Get total royalties distributed
 - `get-contract-stats`: Get overall contract statistics
+- `get-escrow-info`: Get escrow details and status
+- `get-escrow-milestone`: Get specific milestone information
+- `get-total-escrows`: Get total number of created escrows
 
 ## 🛠️ Usage Examples
 
@@ -73,6 +99,24 @@ Song owners can activate or deactivate their songs.
 (contract-call? .MRDistro get-user-balance 'SP1YOUR-ADDRESS)
 ```
 
+### Create an Escrow
+```clarity
+(contract-call? .MRDistro create-escrow 
+  'SP1BENEFICIARY 
+  u144000 
+  (list u500000 u300000 u200000))
+```
+
+### Approve Milestone
+```clarity
+(contract-call? .MRDistro approve-milestone u1 u0)
+```
+
+### Claim Time-Locked Escrow
+```clarity
+(contract-call? .MRDistro claim-time-locked-escrow u1)
+```
+
 ## 🎯 Use Cases
 
 - **Independent Artists** 🎤: Split streaming revenue automatically
@@ -80,6 +124,8 @@ Song owners can activate or deactivate their songs.
 - **Songwriting Teams** ✍️: Fair distribution among co-writers
 - **Producer Collaborations** 🎛️: Transparent producer royalties
 - **Music Publishers** 📚: Automated publishing royalties
+- **🆕 Advance Funding** 💰: Artists receive upfront capital for production
+- **🆕 Investment Protection** 🛡️: Milestone-based fund release for investors
 
 ## 🔒 Security Features
 
@@ -94,6 +140,8 @@ Track the growth and usage of the platform:
 - Total songs registered
 - Total royalties distributed  
 - Individual user earnings and withdrawals
+- Total escrows created and managed
+- Milestone completion rates
 
 ## 🚦 Getting Started
 

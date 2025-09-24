@@ -11,9 +11,14 @@
 (define-constant ERR_INVALID_RECIPIENT (err u105))
 (define-constant ERR_NO_EARNINGS (err u106))
 (define-constant ERR_INVALID_AMOUNT (err u107))
+(define-constant ERR_ESCROW_NOT_FOUND (err u108))
+(define-constant ERR_ESCROW_NOT_READY (err u109))
+(define-constant ERR_MILESTONE_NOT_APPROVED (err u110))
+(define-constant ERR_INSUFFICIENT_ESCROW_BALANCE (err u111))
 
 (define-data-var total-songs uint u0)
 (define-data-var total-royalties-distributed uint u0)
+(define-data-var total-escrows uint u0)
 
 (define-map songs 
   { song-id: uint }
@@ -39,6 +44,26 @@
 (define-map song-contributors
   { song-id: uint }
   { contributors: (list 20 principal) }
+)
+
+(define-map escrows
+  { escrow-id: uint }
+  {
+    artist: principal,
+    beneficiary: principal,
+    total-amount: uint,
+    released-amount: uint,
+    cliff-height: uint,
+    milestone-count: uint,
+    approved-milestones: uint,
+    created-at: uint,
+    is-active: bool
+  }
+)
+
+(define-map escrow-milestones
+  { escrow-id: uint, milestone-id: uint }
+  { amount: uint, is-approved: bool }
 )
 
 (define-private (is-song-owner (song-id uint) (user principal))
@@ -293,6 +318,151 @@
   {
     total-songs: (var-get total-songs),
     total-royalties-distributed: (var-get total-royalties-distributed),
+    total-escrows: (var-get total-escrows),
     contract-owner: CONTRACT_OWNER
   }
+)
+
+(define-public (create-escrow (beneficiary principal) (cliff-height uint) (milestones (list 10 uint)))
+  (let 
+    (
+      (escrow-id (+ (var-get total-escrows) u1))
+      (total-milestone-amount (fold + milestones u0))
+    )
+    (asserts! (> total-milestone-amount u0) ERR_INVALID_AMOUNT)
+    (asserts! (<= (len milestones) u10) ERR_INVALID_PERCENTAGE)
+    
+    (try! (stx-transfer? total-milestone-amount tx-sender (as-contract tx-sender)))
+    
+    (map-set escrows
+      { escrow-id: escrow-id }
+      {
+        artist: tx-sender,
+        beneficiary: beneficiary,
+        total-amount: total-milestone-amount,
+        released-amount: u0,
+        cliff-height: cliff-height,
+        milestone-count: (len milestones),
+        approved-milestones: u0,
+        created-at: stacks-block-height,
+        is-active: true
+      }
+    )
+    
+    (setup-escrow-milestones escrow-id milestones)
+    (var-set total-escrows escrow-id)
+    (ok escrow-id)
+  )
+)
+
+(define-private (setup-escrow-milestones (escrow-id uint) (milestones (list 10 uint)))
+  (and
+    (setup-milestone-if-exists escrow-id u0 (element-at milestones u0))
+    (setup-milestone-if-exists escrow-id u1 (element-at milestones u1))
+    (setup-milestone-if-exists escrow-id u2 (element-at milestones u2))
+    (setup-milestone-if-exists escrow-id u3 (element-at milestones u3))
+    (setup-milestone-if-exists escrow-id u4 (element-at milestones u4))
+    (setup-milestone-if-exists escrow-id u5 (element-at milestones u5))
+    (setup-milestone-if-exists escrow-id u6 (element-at milestones u6))
+    (setup-milestone-if-exists escrow-id u7 (element-at milestones u7))
+    (setup-milestone-if-exists escrow-id u8 (element-at milestones u8))
+    (setup-milestone-if-exists escrow-id u9 (element-at milestones u9))
+  )
+)
+
+(define-private (setup-milestone-if-exists (escrow-id uint) (milestone-id uint) (amount (optional uint)))
+  (match amount
+    amt (begin
+          (map-set escrow-milestones
+            { escrow-id: escrow-id, milestone-id: milestone-id }
+            { amount: amt, is-approved: false }
+          )
+          true)
+    true)
+)
+
+(define-public (approve-milestone (escrow-id uint) (milestone-id uint))
+  (let 
+    (
+      (escrow-data (unwrap! (map-get? escrows { escrow-id: escrow-id }) ERR_ESCROW_NOT_FOUND))
+      (milestone-data (unwrap! (map-get? escrow-milestones { escrow-id: escrow-id, milestone-id: milestone-id }) ERR_MILESTONE_NOT_APPROVED))
+      (milestone-amount (get amount milestone-data))
+    )
+    (asserts! (is-eq tx-sender (get artist escrow-data)) ERR_UNAUTHORIZED)
+    (asserts! (get is-active escrow-data) ERR_ESCROW_NOT_FOUND)
+    (asserts! (not (get is-approved milestone-data)) ERR_MILESTONE_NOT_APPROVED)
+    (asserts! (>= (- (get total-amount escrow-data) (get released-amount escrow-data)) milestone-amount) ERR_INSUFFICIENT_ESCROW_BALANCE)
+    
+    (try! (as-contract (stx-transfer? milestone-amount tx-sender (get beneficiary escrow-data))))
+    
+    (map-set escrow-milestones
+      { escrow-id: escrow-id, milestone-id: milestone-id }
+      { amount: milestone-amount, is-approved: true }
+    )
+    
+    (map-set escrows
+      { escrow-id: escrow-id }
+      (merge escrow-data {
+        released-amount: (+ (get released-amount escrow-data) milestone-amount),
+        approved-milestones: (+ (get approved-milestones escrow-data) u1)
+      })
+    )
+    
+    (ok milestone-amount)
+  )
+)
+
+(define-public (claim-time-locked-escrow (escrow-id uint))
+  (let 
+    (
+      (escrow-data (unwrap! (map-get? escrows { escrow-id: escrow-id }) ERR_ESCROW_NOT_FOUND))
+      (available-amount (- (get total-amount escrow-data) (get released-amount escrow-data)))
+    )
+    (asserts! (is-eq tx-sender (get beneficiary escrow-data)) ERR_UNAUTHORIZED)
+    (asserts! (get is-active escrow-data) ERR_ESCROW_NOT_FOUND)
+    (asserts! (>= stacks-block-height (get cliff-height escrow-data)) ERR_ESCROW_NOT_READY)
+    (asserts! (> available-amount u0) ERR_INSUFFICIENT_ESCROW_BALANCE)
+    
+    (try! (as-contract (stx-transfer? available-amount tx-sender (get beneficiary escrow-data))))
+    
+    (map-set escrows
+      { escrow-id: escrow-id }
+      (merge escrow-data { released-amount: (get total-amount escrow-data) })
+    )
+    
+    (ok available-amount)
+  )
+)
+
+(define-public (cancel-escrow (escrow-id uint))
+  (let 
+    (
+      (escrow-data (unwrap! (map-get? escrows { escrow-id: escrow-id }) ERR_ESCROW_NOT_FOUND))
+      (refund-amount (- (get total-amount escrow-data) (get released-amount escrow-data)))
+    )
+    (asserts! (is-eq tx-sender (get artist escrow-data)) ERR_UNAUTHORIZED)
+    (asserts! (get is-active escrow-data) ERR_ESCROW_NOT_FOUND)
+    (asserts! (> refund-amount u0) ERR_INSUFFICIENT_ESCROW_BALANCE)
+    
+    (try! (as-contract (stx-transfer? refund-amount tx-sender (get artist escrow-data))))
+    
+    (map-set escrows
+      { escrow-id: escrow-id }
+      (merge escrow-data { is-active: false })
+    )
+    
+    (ok refund-amount)
+  )
+)
+
+(define-read-only (get-escrow-info (escrow-id uint))
+  (map-get? escrows { escrow-id: escrow-id })
+)
+
+(define-read-only (get-escrow-milestone (escrow-id uint) (milestone-id uint))
+  (map-get? escrow-milestones { escrow-id: escrow-id, milestone-id: milestone-id })
+)
+
+(define-read-only (get-total-escrows)
+  (var-get total-escrows)
 )
