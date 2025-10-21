@@ -188,6 +188,7 @@
     (asserts! (get is-active song-data) ERR_SONG_NOT_FOUND)
     
     (distribute-to-all-contributors song-id contributors amount)
+    (try! (track-distribution-event song-id amount))
     
     (map-set songs
       { song-id: song-id }
@@ -465,4 +466,52 @@
 
 (define-read-only (get-total-escrows)
   (var-get total-escrows)
+)
+
+
+(define-map artist-performance
+  { artist: principal }
+  { total-songs: uint, total-earnings: uint, distribution-count: uint }
+)
+
+(define-map top-songs
+  { rank: uint }
+  { song-id: uint, earnings: uint }
+)
+
+(define-data-var total-distribution-events uint u0)
+
+(define-private (update-artist-performance (artist principal) (amount uint))
+  (let 
+    (
+      (current-perf (default-to { total-songs: u0, total-earnings: u0, distribution-count: u0 } 
+                                (map-get? artist-performance { artist: artist })))
+      (new-earnings (+ (get total-earnings current-perf) amount))
+      (new-dist-count (+ (get distribution-count current-perf) u1))
+    )
+    (map-set artist-performance 
+      { artist: artist }
+      { total-songs: (get total-songs current-perf), total-earnings: new-earnings, distribution-count: new-dist-count }
+    )
+  )
+)
+
+(define-private (track-distribution-event (song-id uint) (amount uint))
+  (let 
+    (
+      (song-data (unwrap! (map-get? songs { song-id: song-id }) ERR_SONG_NOT_FOUND))
+      (artist (get artist song-data))
+    )
+    (update-artist-performance artist amount)
+    (var-set total-distribution-events (+ (var-get total-distribution-events) u1))
+    (ok true)
+  )
+)
+
+(define-read-only (get-artist-performance (artist principal))
+  (map-get? artist-performance { artist: artist })
+)
+
+(define-read-only (get-top-earning-songs-count)
+  (var-get total-distribution-events)
 )
